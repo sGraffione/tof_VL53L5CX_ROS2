@@ -1,15 +1,45 @@
 cmake_minimum_required(VERSION 3.8)
-project(VL53L5CX)
+project(vl53l5cx)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
 # find dependencies
+set(THIS_PACKAGE_INCLUDE_DEPENDS
+  ament_cmake
+  rclcpp
+  rosidl_default_generators
+)
+
 find_package(ament_cmake REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+foreach(Dependency IN ITEMS ${THIS_PACKAGE_INCLUDE_DEPENDS})
+  find_package(${Dependency} REQUIRED)
+endforeach()
+
+
+set(HEADERS
+  #core
+  src/uld-driver/inc/
+  #platform
+  src/platform/
+  )
+set(SOURCES
+  #ros2 node
+  src/vl53l5cx_node.cpp
+  #core
+  src/uld-driver/src/vl53l5cx_api.c
+  src/uld-driver/src/vl53l5cx_plugin_detection_thresholds.c
+  src/uld-driver/src/vl53l5cx_plugin_motion_indicator.c
+  src/uld-driver/src/vl53l5cx_plugin_xtalk.c
+  #platform
+  src/platform/platform.c)
+
+  set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE CXX) # force to use cpp
+add_executable(vl53l5cx_node ${SOURCES})
+ament_target_dependencies(vl53l5cx_node rclcpp)
+target_include_directories(vl53l5cx_node PUBLIC ${HEADERS})
+
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -22,5 +52,9 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+
+install(TARGETS vl53l5cx_node
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 ament_package()
