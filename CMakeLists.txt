@@ -10,6 +10,11 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
   ament_cmake
   rclcpp
   rosidl_default_generators
+  sensor_msgs
+  pcl_conversions
+  rcl_interfaces
+  tf2_geometry_msgs
+  Eigen3
 )
 
 find_package(ament_cmake REQUIRED)
@@ -37,9 +42,12 @@ set(SOURCES
 
   set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE CXX) # force to use cpp
 add_executable(vl53l5cx_node ${SOURCES})
-ament_target_dependencies(vl53l5cx_node rclcpp)
+ament_target_dependencies(vl53l5cx_node rclcpp sensor_msgs pcl_conversions rcl_interfaces tf2_geometry_msgs)
 target_include_directories(vl53l5cx_node PUBLIC ${HEADERS})
 
+target_link_libraries(vl53l5cx_node
+  ${Boost_SYSTEM_LIBRARY}  # pcl_conversions requires this
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -56,5 +64,7 @@ endif()
 install(TARGETS vl53l5cx_node
   DESTINATION lib/${PROJECT_NAME}
 )
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME})
 
 ament_package()
