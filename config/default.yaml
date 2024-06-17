@@ -1,0 +1,4 @@
+vl53l5cx_node:
+  ros_parameters:
+    mode: "XYZ"
+    resolution: 5

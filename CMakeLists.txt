@@ -15,6 +15,7 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
   rcl_interfaces
   tf2_geometry_msgs
   Eigen3
+  minicar_interfaces
 )
 
 find_package(ament_cmake REQUIRED)
@@ -42,7 +43,7 @@ set(SOURCES
 
   set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE CXX) # force to use cpp
 add_executable(vl53l5cx_node ${SOURCES})
-ament_target_dependencies(vl53l5cx_node rclcpp sensor_msgs pcl_conversions rcl_interfaces tf2_geometry_msgs)
+ament_target_dependencies(vl53l5cx_node rclcpp sensor_msgs pcl_conversions rcl_interfaces tf2_geometry_msgs minicar_interfaces)
 target_include_directories(vl53l5cx_node PUBLIC ${HEADERS})
 
 target_link_libraries(vl53l5cx_node

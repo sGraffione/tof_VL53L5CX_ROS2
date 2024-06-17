@@ -1,5 +1,0 @@
-<launch>
-    <arg name="resolution" default="4"/>
-    <arg name="mode" default="XYZ"/>
-    <node pkg="vl53l5cx" exec="vl53l5cx_node" name="laser_sensor" namespace="vl53l5cx">
-</launch>
