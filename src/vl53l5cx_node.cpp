@@ -28,17 +28,21 @@ class RangingSensor : public rclcpp::Node {
     public:
         RangingSensor() : Node("vl53l5cx_node"), count_(0) {
 
+            // Declare parameters
+            declare_parameter("resolution",resolution_);
+            declare_parameter("mode",mode_);
             // parameters acquiring
             get_parameter_or("resolution",resolution_,resolution_);
             get_parameter_or("mode",mode_,mode_); // TODO: add control on parameters to avoid wrong params
-            
 
             // check parameters quality
             if(resolution_!=4 && resolution_!=8){
-                RCUTILS_LOG_ERROR_NAMED(get_name(), "Wrong resolution parameter (passed parameter is %i). Must be '4' or '8'.\n\r",resolution_);
+                RCLCPP_ERROR(this->get_logger(), "Wrong resolution parameter (passed parameter is %i). Must be '4' or '8'.\n\r",resolution_);
+                rclcpp::shutdown();
             }
             if(mode_.compare("XYZ")!=0 && mode_.compare("distance")!=0){
-                RCUTILS_LOG_ERROR_NAMED(get_name(), "Wrong mode parameter (passed parameter is %s). Must be 'XYZ' or 'distance'.\n\r",mode_.c_str());
+                RCLCPP_ERROR(this->get_logger(), "Wrong mode parameter (passed parameter is %s). Must be 'XYZ' or 'distance'.\n\r",mode_.c_str());
+                rclcpp::shutdown();
             }
 
 
@@ -49,9 +53,9 @@ class RangingSensor : public rclcpp::Node {
 
             RCLCPP_DEBUG(this->get_logger(),"Sensor starting in %s mode with %ix%i resolution\n",mode_.c_str(),width_,height_);
             // setting up publisher and timer
-            if(mode_.compare("XYZ")){
+            if(mode_.compare("XYZ")==0){
                 pcl_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("tof_sensor",1);
-            }else if(mode_.compare("distance")){
+            }else if(mode_.compare("distance")==0){
                 tof_publisher_ = this->create_publisher<minicar_interfaces::msg::TofDistanceSensor>("tof_sensor",1);
             }
             
@@ -66,7 +70,7 @@ class RangingSensor : public rclcpp::Node {
             status_ = vl53l5cx_comms_init(&Dev.platform);
             if(status_)
             {
-                RCUTILS_LOG_ERROR_NAMED(get_name(), "VL53L5CX comms init failed.\n\r");
+                RCLCPP_ERROR(this->get_logger(), "VL53L5CX comms init failed.\n\r");
                 closeConnection();
             }
 
@@ -78,14 +82,15 @@ class RangingSensor : public rclcpp::Node {
         void closeConnection(){
             vl53l5cx_stop_ranging(&Dev);
             vl53l5cx_comms_close(&Dev.platform);
+            rclcpp::shutdown();
         }
 
         void publishMessage(){
             //RCLCPP_DEBUG_STREAM(this->get_logger(), "Publishing: '%s'", message_.); TODO: to prepare a debug message
             // Publish
-            if(mode_.compare("XYZ")){
+            if(mode_.compare("XYZ")==0){
                 pcl_publisher_->publish(*pc2_msg_);
-            }else if(mode_.compare("distance")){
+            }else if(mode_.compare("distance")==0){
                 tof_publisher_->publish(*tof_msg_);
             }
         }
@@ -141,7 +146,7 @@ class RangingSensor : public rclcpp::Node {
 
                 if(isReady)
                 {
-                    RCLCPP_DEBUG_STREAM(this->get_logger(), "Data ready\n");
+                    RCLCPP_DEBUG(this->get_logger(), "Data ready\n");
                     vl53l5cx_get_ranging_data(p_dev, &Results);
                     createScanningMessage(Results);
                 }
@@ -152,9 +157,10 @@ class RangingSensor : public rclcpp::Node {
     private:
         void createScanningMessage(VL53L5CX_ResultsData Results)
         {
-            RCLCPP_DEBUG_STREAM(this->get_logger(), "Creating new message");
+            RCLCPP_DEBUG(this->get_logger(), "Creating new message");
 
-            if(mode_.compare("XYZ")){
+            if(mode_.compare("XYZ")==0){
+                RCLCPP_DEBUG(this->get_logger(),"Entering XYZ");
                 pcl::PointXYZ pt;
                 cloud_.clear();
 
@@ -186,7 +192,7 @@ class RangingSensor : public rclcpp::Node {
                 pc2_msg_->header.stamp = now();
                 pc2_msg_->height = height_;
                 pc2_msg_->width = width_;
-            }else if (mode_.compare("distance")){
+            }else if (mode_.compare("distance")==0){
                 std::vector<float> distances;
                 for (int counter = 0; counter < n_beams_; counter++){
                     distances.push_back(Results.distance_mm[VL53L5CX_NB_TARGET_PER_ZONE*counter]/1000.0);

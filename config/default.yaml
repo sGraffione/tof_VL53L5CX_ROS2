@@ -1,4 +1,5 @@
-vl53l5cx_node:
-  ros_parameters:
-    mode: "XYZ"
-    resolution: 5
+tof_sensor: # namespace
+  vl53l5cx_node: # node name
+    ros__parameters: # parameters list
+      mode: "distance"
+      resolution: 4
