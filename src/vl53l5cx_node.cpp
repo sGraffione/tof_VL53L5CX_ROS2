@@ -16,11 +16,14 @@
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "minicar_interfaces/msg/tof_distance_sensor.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 
 #include "vl53l5cx_api.h"
 
 #define ToRadians M_PI/180.0
 #define ToDegree 180.0/M_PI
+#define PCL_MODE "PCL"
+#define LASERSCAN_MODE "LASER_SCAN"
 
 using namespace std::chrono_literals;
 
@@ -33,16 +36,21 @@ class RangingSensor : public rclcpp::Node {
             declare_parameter("mode",mode_);
             // parameters acquiring
             get_parameter_or("resolution",resolution_,resolution_);
-            get_parameter_or("mode",mode_,mode_); // TODO: add control on parameters to avoid wrong params
+            get_parameter_or("mode",mode_,mode_);
 
             // check parameters quality
             if(resolution_!=4 && resolution_!=8){
                 RCLCPP_ERROR(this->get_logger(), "Wrong resolution parameter (passed parameter is %i). Must be '4' or '8'.\n\r",resolution_);
                 rclcpp::shutdown();
             }
-            if(mode_.compare("XYZ")!=0 && mode_.compare("distance")!=0){
+            if(mode_.compare(PCL_MODE)!=0 && mode_.compare(LASERSCAN_MODE)!=0){
                 RCLCPP_ERROR(this->get_logger(), "Wrong mode parameter (passed parameter is %s). Must be 'XYZ' or 'distance'.\n\r",mode_.c_str());
                 rclcpp::shutdown();
+            }
+            if(resolution_==4){ // at this point it's 4x4 or 8x8. Previous check avoid unknown resolutions
+                vl53l5cx_set_resolution(&Dev, VL53L5CX_RESOLUTION_4X4);
+            }else{
+                vl53l5cx_set_resolution(&Dev, VL53L5CX_RESOLUTION_8X8);
             }
 
 
@@ -51,15 +59,20 @@ class RangingSensor : public rclcpp::Node {
             // update number of beams depending on the current resolution
             n_beams_ = width_*height_;
 
+            // update the steps size
+            hStep_ = hFoV_/width_;
+            vStep_ = vFoV_/height_;
+
             RCLCPP_DEBUG(this->get_logger(),"Sensor starting in %s mode with %ix%i resolution\n",mode_.c_str(),width_,height_);
             // setting up publisher and timer
-            if(mode_.compare("XYZ")==0){
+            //rclcpp::QoS customQoS = rclcpp::QoS(1); // setting Quality of Service
+            if(mode_.compare(PCL_MODE)==0){
                 pcl_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("tof_sensor",1);
-            }else if(mode_.compare("distance")==0){
-                tof_publisher_ = this->create_publisher<minicar_interfaces::msg::TofDistanceSensor>("tof_sensor",1);
+            }else if(mode_.compare(LASERSCAN_MODE)==0){
+                tof_publisher_ = this->create_publisher<sensor_msgs::msg::LaserScan>("tof_sensor",1);
             }
             
-            timer_ = this->create_wall_timer(100ms, std::bind(&RangingSensor::publishMessage, this));
+            //timer_ = this->create_wall_timer(100ms, std::bind(&RangingSensor::publishMessage, this));
 
 
             /*********************************/
@@ -83,17 +96,7 @@ class RangingSensor : public rclcpp::Node {
             vl53l5cx_stop_ranging(&Dev);
             vl53l5cx_comms_close(&Dev.platform);
             rclcpp::shutdown();
-        }
-
-        void publishMessage(){
-            //RCLCPP_DEBUG_STREAM(this->get_logger(), "Publishing: '%s'", message_.); TODO: to prepare a debug message
-            // Publish
-            if(mode_.compare("XYZ")==0){
-                pcl_publisher_->publish(*pc2_msg_);
-            }else if(mode_.compare("distance")==0){
-                tof_publisher_->publish(*tof_msg_);
-            }
-        }
+        }        
 
         int simpleRangingData(VL53L5CX_Configuration *p_dev)
         {
@@ -140,6 +143,7 @@ class RangingSensor : public rclcpp::Node {
                 /* Use polling function to know when a new measurement is ready.
                 * Another way can be to wait for HW interrupt raised on PIN A3
                 * (GPIO 1) when a new measurement is ready */
+               // TODO: make this an option
 
         
                 isReady = wait_for_dataready(&p_dev->platform);
@@ -149,18 +153,29 @@ class RangingSensor : public rclcpp::Node {
                     RCLCPP_DEBUG(this->get_logger(), "Data ready\n");
                     vl53l5cx_get_ranging_data(p_dev, &Results);
                     createScanningMessage(Results);
+                    publishMessage();
                 }
             }
             return status;
         }
 
     private:
+
+        void publishMessage(){
+            //RCLCPP_DEBUG(this->get_logger(), "Current mode: %s | Desired mode: %s\n", mode_.c_str(), LASERSCAN_MODE);
+            // Publish
+            if(mode_.compare(PCL_MODE)==0){
+                pcl_publisher_->publish(*pc2_msg_);
+            }else if(mode_.compare(LASERSCAN_MODE)==0){
+                RCLCPP_DEBUG(this->get_logger(), "Publishing LaserScan");
+                tof_publisher_->publish(tof_msg_);
+            }
+        }
+
         void createScanningMessage(VL53L5CX_ResultsData Results)
         {
-            RCLCPP_DEBUG(this->get_logger(), "Creating new message");
-
-            if(mode_.compare("XYZ")==0){
-                RCLCPP_DEBUG(this->get_logger(),"Entering XYZ");
+            if(mode_.compare(PCL_MODE)==0){
+                //RCLCPP_DEBUG(this->get_logger(),"Creating PCL message");
                 pcl::PointXYZ pt;
                 cloud_.clear();
 
@@ -170,7 +185,7 @@ class RangingSensor : public rclcpp::Node {
                     
                     float phi_j = (j-1.5)*hStep_;
                     float theta_i = (i-1.5)*vStep_;
-                    float distance = Results.distance_mm[VL53L5CX_NB_TARGET_PER_ZONE*counter]/1000.0; // TODO: conversion to meters
+                    float distance = Results.distance_mm[VL53L5CX_NB_TARGET_PER_ZONE*counter]/1000.0; // to meters
 
                     pt = pcl::PointXYZ();
 
@@ -186,19 +201,35 @@ class RangingSensor : public rclcpp::Node {
 
                 // Convert list of points into a cloud
                 pc2_msg_ = std::make_shared<sensor_msgs::msg::PointCloud2>();
-                pcl::toROSMsg(cloud_, *pc2_msg_);
-                // pcl::toROSMsg()
                 pc2_msg_->header.frame_id = frame_id_;
                 pc2_msg_->header.stamp = now();
                 pc2_msg_->height = height_;
                 pc2_msg_->width = width_;
-            }else if (mode_.compare("distance")==0){
-                std::vector<float> distances;
+                pcl::toROSMsg(cloud_, *pc2_msg_);
+
+            }else if (mode_.compare(LASERSCAN_MODE)==0){
+                //RCLCPP_DEBUG(this->get_logger(),"Creating LASERSCAN message");
+                tof_msg_.header.frame_id = frame_id_;
+                //RCLCPP_DEBUG(this->get_logger(),"frame id");
+                tof_msg_.header.stamp = now();
+                tof_msg_.range_min = minRange_; // 2 cm -> 0.02 meters
+                tof_msg_.range_max = maxRange_; // meters
+                tof_msg_.angle_min = -hFoV_/2;
+                tof_msg_.angle_max = hFoV_/2;
+                tof_msg_.angle_increment = hStep_;
+                tof_msg_.time_increment = (1/0.1)/width_;
+                //RCLCPP_DEBUG(this->get_logger(),"Struct defined");
+                tof_msg_.ranges.resize(width_, maxRange_);
+                //RCLCPP_DEBUG(this->get_logger(),"Ranges resize");
+                float currentBeamRange;
                 for (int counter = 0; counter < n_beams_; counter++){
-                    distances.push_back(Results.distance_mm[VL53L5CX_NB_TARGET_PER_ZONE*counter]/1000.0);
+                    float range = Results.distance_mm[VL53L5CX_NB_TARGET_PER_ZONE*counter]/1000.0; // to meters
+                    range = (range==0.0) ? 4.0 : range; // if the sensor returns exatly 0, that means out-of-range
+                    RCLCPP_DEBUG(this->get_logger(),"Range %i: %f",counter,range);
+                    currentBeamRange = tof_msg_.ranges[counter%resolution_];
+                    RCLCPP_DEBUG(this->get_logger(),"Section %i",counter%resolution_);
+                    tof_msg_.ranges[counter%resolution_] = (currentBeamRange<range) ? currentBeamRange : range;
                 }
-                tof_msg_->distance = distances;
-                tof_msg_->resolution = resolution_;
             }
         }
 
@@ -207,7 +238,7 @@ class RangingSensor : public rclcpp::Node {
 
         // Sensor configuration
         // Default configuration
-        std::string mode_ = "XYZ"; // or "distance"
+        std::string mode_ = LASERSCAN_MODE;
         int n_beams_ = 16; // 4 x 4 matrix
         int resolution_ = 4;
         int height_ = 4;
@@ -216,16 +247,18 @@ class RangingSensor : public rclcpp::Node {
         float vFoV_ = 45*ToRadians;
         float hStep_ = hFoV_/width_;
         float vStep_ = vFoV_/height_;
+        float maxRange_ = 4.0;
+        float minRange_ = 0.02;
 
         rclcpp::TimerBase::SharedPtr timer_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pcl_publisher_;
-        rclcpp::Publisher<minicar_interfaces::msg::TofDistanceSensor>::SharedPtr tof_publisher_;
+        rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr tof_publisher_;
         
-        // Point Cloud variables
-        std::string frame_id_ = "laser_detection";
+        // PointCloud/LaserScan variables
+        std::string frame_id_ = "scan";
         pcl::PointCloud<pcl::PointXYZ> cloud_;
         sensor_msgs::msg::PointCloud2::SharedPtr pc2_msg_;
-        minicar_interfaces::msg::TofDistanceSensor::SharedPtr tof_msg_;
+        sensor_msgs::msg::LaserScan tof_msg_;
 
         size_t count_;
 };

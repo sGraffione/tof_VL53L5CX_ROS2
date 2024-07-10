@@ -14,7 +14,7 @@ def generate_launch_description():
 
     logger = substitutions.LaunchConfiguration("log_level")
     return LaunchDescription([
-        actions.DeclareLaunchArgument("log_level", default_value=["info"], description="Logging level"),
+        actions.DeclareLaunchArgument("log_level", default_value=["debug"], description="Logging level"),
         launch_ros.actions.Node(
             package='vl53l5cx',
             executable='vl53l5cx_node',
